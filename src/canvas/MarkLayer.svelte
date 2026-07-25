@@ -9,7 +9,7 @@
    * Text labels are the one exception: they stay clickable so they can be edited.
    */
   import { ViewportPortal } from '@xyflow/svelte';
-  import { inkPath, arrowHead, markBounds } from '../lib/ink.js';
+  import { inkPath, arrowHead, arrowPath, arrowTail, markBounds } from '../lib/ink.js';
 
   let {
     marks = [],
@@ -99,16 +99,16 @@
           />
         {:else if m.type === 'arrow'}
           <g class:draft={m === draft}>
-            <line
-              x1={m.from[0]}
-              y1={m.from[1]}
-              x2={m.to[0]}
-              y2={m.to[1]}
+            <!-- one path for both cases: `arrowPath` emits a plain L for an
+                 arrow with no control points, so straight arrows are unchanged -->
+            <path
+              d={arrowPath(m)}
               stroke={m.color}
               stroke-width={2.2 * lift}
               stroke-linecap="round"
+              fill="none"
             />
-            <polygon points={arrowHead(m.from, m.to, 12 * lift)} fill={m.color} />
+            <polygon points={arrowHead(arrowTail(m), m.to, 12 * lift)} fill={m.color} />
           </g>
         {:else if m.type === 'region'}
           <g class:draft={m === draft}>

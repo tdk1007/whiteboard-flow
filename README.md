@@ -73,12 +73,19 @@ the thing you'd actually do at a whiteboard.
 | Text | `t` | click anywhere, type a note | the note, filed **under the box it sits on** |
 | Box | `b` | drag out your own box, name it | a proposed piece of work (same as double-click) |
 | Region | `r` | ring a whole cluster | *"treat these as one unit: Queue, Deck, Validation"* |
-| Arrow | `a` | point from one box to another | *"Export → Path associations"*, and a contract step |
+| Arrow | `a` | point from one box to another — **swing it** and it keeps the curve | *"Export → Path associations"*, and a contract step |
 | Eraser | `e` | click or drag over markup | — |
 
 `⌘Z` undoes drawing, and only drawing — verdicts and comments are deliberate
 single clicks and are never silently reversed. Colour picker appears while a
 drawing tool is active; **clear N** removes all markup (undoable).
+
+**Arrows curve the way you drag them.** A straight line can't get around the
+boxes in between, so the arrow tool fits a cubic Bézier to the path your pointer
+actually travelled — swing it wide and it stays swung. Hold **shift** to snap it
+straight. The endpoints are pinned through the fit, so a curved arrow still
+resolves to *"X → Y"* exactly like a straight one; the curve is presentation and
+the meaning is unchanged.
 
 **Freehand is not decoration — it's typed data.** Every mark records which plan
 boxes it covers (`anchors`) at the moment you draw it, so `read_feedback.py` can
@@ -152,7 +159,8 @@ by node/edge id; freehand lives in `marks`:
       "anchors": ["decide"],                    // plan boxes this covers
       "origin": { "id": "decide", "x": 900, "y": 640 } },  // where that box was
     { "type": "text", "x": 1882, "y": 1024.5, "text": "who owns this?", "anchors": ["deploy"] },
-    { "type": "arrow", "from": [x, y], "to": [x, y], "hitFrom": "export", "hitTo": "paths" },
+    { "type": "arrow", "from": [x, y], "to": [x, y], "hitFrom": "export", "hitTo": "paths",
+      "c1": [x, y], "c2": [x, y] },        // cubic control points; absent ⇒ straight
     { "type": "region", "x": 0, "y": 0, "w": 276, "h": 495, "anchors": ["queue", "deck"] }
   ],
   "answers": { "0": "…" },
@@ -192,9 +200,20 @@ by node/edge id; freehand lives in `marks`:
   never paints it. Every stroke was invisible while the data underneath was
   perfectly fine. The layer now sizes itself to the marks it holds with a matching
   `viewBox`, which keeps SVG user units equal to flow coordinates.
-  **Testing lesson:** `getBoundingClientRect()` proves layout, not paint. To prove
-  something is actually rendered, hit-test a point *on* its geometry
-  (`getPointAtLength` + `getScreenCTM` for a path) with `elementsFromPoint`.
+  **Testing lesson:** `getBoundingClientRect()` proves layout, not paint — and
+  `elementsFromPoint` can't stand in for it either, because the whole mark layer
+  is `pointer-events: none` and hit testing therefore looks straight through it.
+  The only honest check is pixels: screenshot the region and look.
+- **A curved arrow is fitted, not invented.** The arrow tool records the path the
+  pointer travelled and least-squares fits a cubic Bézier to it, with both
+  endpoints pinned so the ends still resolve to "X → Y". Chord-length
+  parameterisation alone fits a smooth arch worse than eyeballing it would
+  (13 px off a 400 px arrow); alternating the solve with Newton reparameterisation
+  of each sample's `t` gets that to ~1 px, and the whole fit is ~17 µs, so it runs
+  live on every `pointermove` and you see the curve you're going to get. Below a
+  length-relative bow threshold it stores no control points at all, which is both
+  how shift-to-snap-straight works and why arrows drawn before curves existed
+  render unchanged.
 - **Seed id counters from existing ids, never from `.length`.** Deleting a mark
   and drawing a new one reused a live id, and a duplicate key in an `{#each}` is
   fatal in Svelte — it takes the whole board down rather than dropping one mark.
@@ -206,8 +225,12 @@ by node/edge id; freehand lives in `marks`:
 - **`window.__wbflow`** is exposed for scripting: `.board .nodes .edges .feedback
   .marks .boxes .layout`, `.connect(a,b)`, `.select(id)`, `.focus(id)`,
   `.relayout()`, `.save()`, plus the drawing API — `.tool(name)`, `.color(hex)`,
-  `.ink(points)`, `.arrow(from,to)`, `.region(x,y,w,h)`, `.note(x,y,text)`,
-  `.erase(x,y)`, `.clearMarks()`, `.undo()`.
+  `.ink(points)`, `.arrow(from,to,{bow})`, `.arrowFit(points)`, `.region(x,y,w,h)`,
+  `.note(x,y,text)`, `.erase(x,y)`, `.clearMarks()`, `.undo()`.
+  Note `.tool()` is idempotent, unlike the toolbar button it stands in for:
+  clicking the tool you're already holding toggles back to select, which is right
+  for a mouse and wrong for a script — it silently made every other scripted drag
+  a no-op until `.tool()` stopped inheriting the toggle.
 - **Automation caveat:** Svelte Flow leaves nodes `visibility: hidden` until its
   ResizeObserver has measured them, which doesn't happen in a background tab — so
   handles aren't hit-testable there. Use `__wbflow.connect()` to script connections.
@@ -229,8 +252,16 @@ fire "at target" and hides propagation bugs): pen, highlighter, text notes,
 region, arrow, box, eraser, `⌘Z`, the colour picker, persistence, and
 reload-from-disk. Mark geometry checked against live box rects — the pen ring
 encloses its box, the region encloses all four boxes it was drawn around, the
-note sits inside the box it names — and paint verified by hit-testing points
-sampled along each stroke's actual curve.
+note sits inside the box it names — and paint verified by screenshot.
+
+Curved arrows: fit accuracy measured against four synthetic gestures (arc, sine
+arch, S-curve, arc + hand jitter) at 0.3–0.7 % of arrow length; endpoints pinned;
+a jittery straight drag and a shift-held bowed drag both stay straight; bounds
+grow to contain the bow; the eraser catches the curve 571 px off its own chord;
+the arrowhead sits 2° off the stroke's arrival angle where using the chord would
+have been 54° off; control points survive translation, so a curve re-seats with
+its shape intact; and the digest reads a curved arrow as the same "X → Y" as a
+straight one.
 
 The pointer-level handle **drag** for proposing a connection is still verified
 only through `__wbflow.connect()` (see the automation caveat above).

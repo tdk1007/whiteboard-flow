@@ -12,7 +12,18 @@
   import ReviewPanel from './panels/ReviewPanel.svelte';
   import DrawToolbar from './canvas/DrawToolbar.svelte';
   import MarkLayer from './canvas/MarkLayer.svelte';
-  import { simplify, normRect, markBounds, anchorsFor, boxAt, markHit, translateMark, PEN_COLORS } from './lib/ink.js';
+  import {
+    simplify,
+    normRect,
+    markBounds,
+    anchorsFor,
+    boxAt,
+    markHit,
+    translateMark,
+    fitArrow,
+    bowCtrl,
+    PEN_COLORS,
+  } from './lib/ink.js';
 
   let { board } = $props();
 
@@ -318,12 +329,26 @@
       // paths get exercised — they run the same commit code the pointer does.
       get marks() { return $state.snapshot(review.fb.marks); },
       get boxes() { return allBoxes(); },
-      tool: (t) => setTool(t),
+      // The toolbar toggles back to select when you click the tool you're already
+      // holding. Scripting must not: `tool('arrow')` means "be in arrow mode", and
+      // silently toggling it off made every other scripted drag a no-op.
+      tool: (t) => {
+        if (t !== tool) setTool(t);
+        return tool;
+      },
       color: (c) => (penColor = c),
       ink: (points, opts = {}) =>
         commitDraft({ id: nextMarkId('ink'), type: 'ink', points, color: penColor, width: 3, ...opts }),
-      arrow: (from, to, opts = {}) =>
-        commitDraft({ id: nextMarkId('arrow'), type: 'arrow', from, to, color: penColor, ...opts }),
+      // `bow` curves it by a fraction of its own length (sign picks the side);
+      // omit for a straight arrow, or pass c1/c2 to place the control points.
+      arrow: (from, to, opts = {}) => {
+        const { bow, ...rest } = opts;
+        const [c1, c2] = bow ? bowCtrl(from, to, bow) : [null, null];
+        return commitDraft({ id: nextMarkId('arrow'), type: 'arrow', from, to, color: penColor, c1, c2, ...rest });
+      },
+      /** Fit a curved arrow to a drawn path — the same code the drag uses. */
+      arrowFit: (points, opts = {}) =>
+        commitDraft({ id: nextMarkId('arrow'), type: 'arrow', color: penColor, ...fitArrow(points, opts), ...(opts.color ? { color: opts.color } : {}) }),
       region: (x, y, w, h, opts = {}) =>
         commitDraft({ id: nextMarkId('region'), type: 'region', x, y, w, h, color: penColor, ...opts }),
       note: (x, y, text, opts = {}) => {
@@ -474,7 +499,9 @@
         highlight: tool === 'marker',
       };
     } else if (tool === 'arrow') {
-      draft = { id, type: 'arrow', from: [p.x, p.y], to: [p.x, p.y], color: penColor };
+      // `__path` is the raw gesture, kept only for the duration of the drag so the
+      // curve can be re-fitted on every move. It never reaches feedback.json.
+      draft = { id, type: 'arrow', from: [p.x, p.y], to: [p.x, p.y], color: penColor, c1: null, c2: null, __path: [[p.x, p.y]] };
     } else {
       // box | region — both drag out a rectangle, they just commit differently
       draft = { id, type: 'region', x: p.x, y: p.y, w: 0, h: 0, color: penColor, __start: [p.x, p.y], __as: tool };
@@ -497,7 +524,17 @@
       if (Math.hypot(p.x - last[0], p.y - last[1]) < 2) return;
       draft = { ...draft, points: [...draft.points, [Math.round(p.x * 10) / 10, Math.round(p.y * 10) / 10]] };
     } else if (draft.type === 'arrow') {
-      draft = { ...draft, to: [Math.round(p.x * 10) / 10, Math.round(p.y * 10) / 10] };
+      // Re-fit on every move rather than only at commit, so the curve you're
+      // shown while dragging is the curve you get.
+      const pt = [Math.round(p.x * 10) / 10, Math.round(p.y * 10) / 10];
+      const last = draft.__path[draft.__path.length - 1];
+      const moved = Math.hypot(pt[0] - last[0], pt[1] - last[1]) >= 2;
+      const path = moved ? [...draft.__path, pt] : draft.__path;
+      // Fit against a path that always ends at the cursor, so the tip tracks the
+      // pointer exactly even between recorded samples.
+      // Shift snaps it straight — sometimes a straight line is the point.
+      const fit = fitArrow(moved ? path : [...path, pt], { straight: event.shiftKey });
+      draft = { ...draft, __path: path, ...fit };
     } else {
       draft = { ...draft, ...normRect(draft.__start, [p.x, p.y]) };
     }
@@ -526,14 +563,23 @@
 
     if (d.type === 'arrow') {
       if (Math.hypot(d.to[0] - d.from[0], d.to[1] - d.from[1]) < 12) return null;
+      const { __path, ...arrow } = d;
+      if (!arrow.c1 || !arrow.c2) {
+        // a straight arrow stores no control points at all, rather than nulls
+        delete arrow.c1;
+        delete arrow.c2;
+      }
       // Resolve both ends to boxes if we can — that turns "I drew an arrow" into
-      // "X should feed Y", which the digest can actually state in words.
-      const from = boxAt(d.from, boxes, 8);
-      const to = boxAt(d.to, boxes, 8);
+      // "X should feed Y", which the digest can actually state in words. The
+      // endpoints are pinned through the curve fit precisely so this still works.
+      const from = boxAt(arrow.from, boxes, 8);
+      const to = boxAt(arrow.to, boxes, 8);
       const anchors = [from, to].filter(Boolean);
-      review.addMark({ ...d, hitFrom: from, hitTo: to, anchors, origin: originFor(anchors, boxes) });
-      if (from && to && from !== to) say(`arrow reads as ${labelOf(from)} → ${labelOf(to)}`);
-      return d.id;
+      review.addMark({ ...arrow, hitFrom: from, hitTo: to, anchors, origin: originFor(anchors, boxes) });
+      if (from && to && from !== to) {
+        say(`arrow reads as ${labelOf(from)} → ${labelOf(to)}${arrow.c1 ? ' (curved)' : ''}`);
+      }
+      return arrow.id;
     }
 
     if (d.w < 16 || d.h < 12) return null; // too small to be deliberate
