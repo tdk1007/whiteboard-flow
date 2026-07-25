@@ -186,6 +186,19 @@ by node/edge id; freehand lives in `marks`:
   being committed at coordinates the reviewer never saw. `flowPos()` reads the
   live `DOMMatrix` off `.svelte-flow__viewport` instead, and the camera doesn't
   animate at all while a drawing tool is up.
+- **The mark SVG must be a real sized box.** A `0×0 <svg>` with `overflow:
+  visible` *looks* like it works — the elements are in the DOM and
+  `getBoundingClientRect()` on the paths returns correct geometry — but Chrome
+  never paints it. Every stroke was invisible while the data underneath was
+  perfectly fine. The layer now sizes itself to the marks it holds with a matching
+  `viewBox`, which keeps SVG user units equal to flow coordinates.
+  **Testing lesson:** `getBoundingClientRect()` proves layout, not paint. To prove
+  something is actually rendered, hit-test a point *on* its geometry
+  (`getPointAtLength` + `getScreenCTM` for a path) with `elementsFromPoint`.
+- **Seed id counters from existing ids, never from `.length`.** Deleting a mark
+  and drawing a new one reused a live id, and a duplicate key in an `{#each}` is
+  fatal in Svelte — it takes the whole board down rather than dropping one mark.
+  The store also de-duplicates on load, so a bad `feedback.json` can't brick it.
 - **Marks are anchored, not just positioned.** Storing flow coordinates alone is
   a trap: the layout moves whenever anything changes (even naming a proposed box
   re-flows the graph and strands every mark). Each mark keeps the position of its
@@ -210,12 +223,14 @@ Verified end-to-end in Chrome: layout, 0-overlap routing, node verdicts, comment
 keyboard, camera-follow, proposing a node, proposing a connection, autosave to
 `feedback.json`, and the digest.
 
-Drawing verified with real pointer events (a genuine `left_click_drag`, then
-synthetic `PointerEvent` sequences through the same handlers): pen, highlighter,
-text notes, region, arrow, box, eraser, `⌘Z`, the colour picker, persistence, and
-reload-from-disk. Mark geometry was checked against live box rects — the pen ring
+Drawing verified with pointer events dispatched at a **descendant** of the pane
+(the path real input takes — dispatching at `.pane` itself lets a capture handler
+fire "at target" and hides propagation bugs): pen, highlighter, text notes,
+region, arrow, box, eraser, `⌘Z`, the colour picker, persistence, and
+reload-from-disk. Mark geometry checked against live box rects — the pen ring
 encloses its box, the region encloses all four boxes it was drawn around, the
-note sits inside the box it names.
+note sits inside the box it names — and paint verified by hit-testing points
+sampled along each stroke's actual curve.
 
 The pointer-level handle **drag** for proposing a connection is still verified
 only through `__wbflow.connect()` (see the automation caveat above).

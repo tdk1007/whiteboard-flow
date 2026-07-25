@@ -29,7 +29,21 @@
   let selection = $state(null); // {kind:'node'|'proposed'|'edge', id, edge?}
   let paneEl = $state(null);
   let lastBounds = null;
-  let propCounter = review.fb.proposedNodes.length;
+
+  /**
+   * Seed an id counter from the ids that already exist, never from `.length`.
+   * Deleting a mark and drawing a new one would otherwise reuse a live id, and a
+   * duplicate key in an `{#each}` is fatal — it takes the whole board down, not
+   * just the mark.
+   */
+  function highestId(items, prefixRe) {
+    return items.reduce((max, it) => {
+      const m = prefixRe.exec(String(it.id || ''));
+      return m ? Math.max(max, Number(m[1]) || 0) : max;
+    }, 0);
+  }
+
+  let propCounter = highestId(review.fb.proposedNodes, /^prop-(\d+)$/);
 
   // ------------------------------------------------------------------ drawing
   let tool = $state('select'); // select | pen | marker | text | box | region | arrow | eraser
@@ -38,7 +52,7 @@
   let editingMark = $state(null); // id of the text mark being typed into
   let hint = $state(null);
   let hintTimer = null;
-  let markCounter = review.fb.marks.length;
+  let markCounter = highestId(review.fb.marks, /^mk-[a-z]+-(\d+)$/);
   const drawTool = $derived(tool !== 'select');
 
   function say(msg) {

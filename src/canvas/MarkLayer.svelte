@@ -24,6 +24,30 @@
   const inkish = $derived([...marks.filter((m) => m.type !== 'text'), ...(draft && draft.type !== 'text' ? [draft] : [])]);
   const labels = $derived([...marks.filter((m) => m.type === 'text'), ...(draft && draft.type === 'text' ? [draft] : [])]);
 
+  /**
+   * The SVG has to be a real, sized box over the content.
+   *
+   * A 0×0 `<svg>` with `overflow: visible` looks like it works — the DOM is there
+   * and `getBoundingClientRect()` on the paths returns correct geometry — but
+   * Chrome never paints it. Every stroke was invisible while the data underneath
+   * was perfectly fine. So: size the element to the marks it holds and set a
+   * matching viewBox, which keeps SVG user units identical to flow coordinates.
+   */
+  const PAD = 60; // stroke width and arrowheads bleed past the geometry
+  const frame = $derived.by(() => {
+    if (!inkish.length) return null;
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const m of inkish) {
+      const b = markBounds(m);
+      x0 = Math.min(x0, b.x);
+      y0 = Math.min(y0, b.y);
+      x1 = Math.max(x1, b.x + b.w);
+      y1 = Math.max(y1, b.y + b.h);
+    }
+    if (!Number.isFinite(x0)) return null;
+    return { x: x0 - PAD, y: y0 - PAD, w: x1 - x0 + PAD * 2, h: y1 - y0 + PAD * 2 };
+  });
+
   // Strokes are stored in flow coordinates, so at low zoom they'd thin out to
   // nothing. Nudge the width back up as you zoom out so markup stays visible in
   // the overview — the same reason the board zooms in when you select a box.
@@ -52,7 +76,14 @@
 
 <ViewportPortal target="front">
   <div class="mark-layer">
-    <svg class="ink" width="0" height="0">
+    {#if frame}
+    <svg
+      class="ink"
+      style="left:{frame.x}px; top:{frame.y}px"
+      width={frame.w}
+      height={frame.h}
+      viewBox="{frame.x} {frame.y} {frame.w} {frame.h}"
+    >
       {#each inkish as m (m.id)}
         {#if m.type === 'ink'}
           <path
@@ -97,6 +128,7 @@
         {/if}
       {/each}
     </svg>
+    {/if}
 
     {#each labels as m (m.id)}
       {@const b = markBounds(m)}
@@ -148,9 +180,7 @@
   }
   .ink {
     position: absolute;
-    left: 0;
-    top: 0;
-    overflow: visible; /* a 0×0 SVG that draws anywhere — keeps flow coords 1:1 */
+    overflow: visible; /* belt and braces for stroke bleed past the padded frame */
   }
   .draft {
     opacity: 0.85;

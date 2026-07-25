@@ -29,8 +29,28 @@ export function emptyFeedback() {
   };
 }
 
+/**
+ * Guard the one input we don't control: whatever is already in feedback.json.
+ * A duplicate id in a keyed `{#each}` is a fatal Svelte error — it takes the
+ * whole board down rather than dropping one mark — so never hand the renderer a
+ * list that could contain one.
+ */
+function dedupe(items) {
+  const seen = new Set();
+  return (items || []).filter((it) => {
+    const id = it?.id;
+    if (!id || seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
+}
+
 export function createFeedbackStore(initial) {
-  const fb = $state({ ...emptyFeedback(), ...(initial || {}) });
+  const seed = { ...emptyFeedback(), ...(initial || {}) };
+  seed.marks = dedupe(seed.marks);
+  seed.proposedNodes = dedupe(seed.proposedNodes);
+  seed.proposedEdges = dedupe(seed.proposedEdges);
+  const fb = $state(seed);
   let status = $state('idle'); // idle | dirty | saving | saved | error
   let timer = null;
 
