@@ -1,0 +1,5 @@
+node_modules/
+dist/
+boards/*/feedback.json
+boards/*/feedback.json.bak
+boards/*/feedback.md

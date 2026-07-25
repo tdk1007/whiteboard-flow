@@ -1,0 +1,108 @@
+:root {
+  --bg: #0e1116;
+  --bg-2: #151a22;
+  --bg-3: #1b222c;
+  --line: #262e3a;
+  --line-2: #333d4c;
+  --ink: #e6ebf2;
+  --ink-2: #9aa7b8;
+  --ink-3: #6b7889;
+
+  --accent: #5aa2ff;
+  --v-first: #ffb648;
+  --v-keep: #47c98a;
+  --v-change: #5aa2ff;
+  --v-cut: #ff6b7d;
+  --proposed: #c77dff;
+
+  --s-done: #47c98a;
+  --s-active: #5aa2ff;
+  --s-planned: #7c879a;
+  --s-risk: #ffb648;
+  --s-blocked: #ff6b7d;
+
+  --radius: 10px;
+  --font: ui-sans-serif, -apple-system, 'SF Pro Text', 'Inter', system-ui, sans-serif;
+  --mono: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace;
+
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+
+html, body, #app {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font);
+  font-size: 13px;
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+textarea, input {
+  font: inherit;
+  color: var(--ink);
+  background: var(--bg);
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  padding: 8px 10px;
+  width: 100%;
+  outline: none;
+  resize: vertical;
+}
+textarea:focus, input:focus { border-color: var(--accent); }
+textarea::placeholder, input::placeholder { color: var(--ink-3); }
+
+/* ---------- Svelte Flow surface ---------- */
+.svelte-flow {
+  background: var(--bg);
+  --xy-background-pattern-dots-color: #212a36;
+  --xy-edge-stroke-default: #4d5a6c;
+  --xy-edge-stroke-selected-default: var(--accent);
+}
+.svelte-flow__node { font-family: var(--font); }
+/* the library styles built-in group nodes with a grey wash + border; ours draws its own */
+.svelte-flow__node-group {
+  background: none;
+  border: none;
+  border-radius: 0;
+}
+.svelte-flow__handle {
+  width: 10px;
+  height: 10px;
+  background: var(--accent);
+  border: 2px solid var(--bg);
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+/* The dot is small on purpose, but grabbing it shouldn't be. This invisible
+   pad keeps the connect target ~28px across even at overview zoom. */
+.svelte-flow__handle::after {
+  content: '';
+  position: absolute;
+  inset: -9px;
+}
+.svelte-flow__node:hover .svelte-flow__handle { opacity: 1; }
+.svelte-flow__attribution { display: none; }
+.svelte-flow__controls-button {
+  background: var(--bg-2);
+  border-bottom: 1px solid var(--line);
+  fill: var(--ink-2);
+}
+.svelte-flow__controls-button:hover { background: var(--bg-3); }
+.svelte-flow__minimap { background: var(--bg-2); border: 1px solid var(--line); border-radius: 8px; }
+.svelte-flow__edge.selected .routed-edge__hit + path { stroke: var(--accent); }
+.svelte-flow__connectionline path { stroke: var(--proposed); stroke-width: 2; stroke-dasharray: 5 4; }

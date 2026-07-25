@@ -1,0 +1,125 @@
+{
+  "title": "Shell Course Review — system + what's next",
+  "subtitle": "~/Work/LMS/shell-review-app · mark up what to do first, what to change, what to cut",
+  "direction": "RIGHT",
+
+  "nodes": [
+    { "id": "census", "group": "Ingest", "kind": "external", "status": "done",
+      "text": "Census workbook",
+      "detail": "~1,524 rows, 7 archetypes",
+      "file": "shell_review_workbook_07-22-26.xlsx" },
+
+    { "id": "catalog", "group": "Ingest", "kind": "external", "status": "done",
+      "text": "Intellum catalog pull",
+      "detail": "read-only; the only authoritative status + is_scheduled",
+      "file": "intellum_courses_catalog.json" },
+
+    { "id": "seed", "group": "Ingest", "kind": "component", "status": "done",
+      "text": "Workbook parse\n+ merge",
+      "detail": "decision-preserving: new rows insert, existing refresh evidence, dropped rows kept as in_census=0",
+      "file": "seed.py" },
+
+    { "id": "enrich", "group": "Ingest", "kind": "component", "status": "done",
+      "text": "Catalog enrich",
+      "detail": "corrects status + is_scheduled; a re-seed never regresses it",
+      "file": "enrich.py" },
+
+    { "id": "db", "group": "Core", "kind": "data", "status": "done",
+      "text": "SQLite",
+      "detail": "sole source of truth · journal_mode=DELETE (never WAL on EFS)",
+      "file": "db.py" },
+
+    { "id": "decide", "group": "Core", "kind": "component", "status": "done",
+      "text": "Decision engine",
+      "detail": "one decision per course; write guard serializes, row version 409s a stale write",
+      "file": "app.py /api/decide" },
+
+    { "id": "live", "group": "Core", "kind": "component", "status": "done",
+      "text": "SSE broker",
+      "detail": "in-process, single worker — every decision reaches every reviewer in ~1s",
+      "file": "live.py" },
+
+    { "id": "claims", "group": "Core", "kind": "component", "status": "done",
+      "text": "Soft claims",
+      "detail": "90s TTL presence chips; the work self-partitions, claims never block a write",
+      "file": "live.py" },
+
+    { "id": "queue", "group": "Review UI", "kind": "ui", "status": "active",
+      "text": "Decision queue",
+      "detail": "keys 1–4 · c/Enter confirm · n/p next-undecided" },
+
+    { "id": "deck", "group": "Review UI", "kind": "ui", "status": "active",
+      "text": "Compare deck",
+      "detail": "twin pairs side by side; Repoint deliberately demoted, key 5 proposes both for deletion" },
+
+    { "id": "validation", "group": "Review UI", "kind": "ui", "status": "active",
+      "text": "Delete validation",
+      "detail": "the only action with a second pass — a delete isn't export-eligible until confirmed" },
+
+    { "id": "scoreboard", "group": "Review UI", "kind": "ui", "status": "active",
+      "text": "Scoreboard",
+      "detail": "per-reviewer throughput, live" },
+
+    { "id": "export", "group": "Output", "kind": "component", "status": "done",
+      "text": "Export",
+      "detail": "conditionally-formatted xlsx of human-decided rows — the app's only output",
+      "file": "export.py" },
+
+    { "id": "snapshots", "group": "Output", "kind": "component", "status": "done",
+      "text": "Snapshots",
+      "detail": "point-in-time DB backups",
+      "file": "snapshots.py" },
+
+    { "id": "handoff", "group": "Output", "kind": "decision", "status": "done",
+      "text": "Never touches the LMS",
+      "detail": "humans + shell_merge + /apply-batch do the writes, under the per-batch gate" },
+
+    { "id": "paths", "group": "Next", "kind": "work", "status": "blocked",
+      "text": "Path associations",
+      "detail": "census carries no in_path / path_names — the card shows “—” even for courses in several paths. seed.py already maps the headers." },
+
+    { "id": "ilt-score", "group": "Next", "kind": "work", "status": "planned",
+      "text": "ILT into the suggestion",
+      "detail": "is_scheduled shows as a signal but doesn't yet move the suggested disposition at census-build time" },
+
+    { "id": "deploy", "group": "Next", "kind": "work", "status": "risk",
+      "text": "Deploy to rivbox",
+      "detail": "rivctl behind the VPN; EFS mounts at /data so code pushes never touch data. First boot is an empty DB — seed via admin upload." }
+  ],
+
+  "edges": [
+    { "from": "census", "to": "seed", "text": "parse" },
+    { "from": "catalog", "to": "enrich", "text": "pull" },
+    { "from": "seed", "to": "db", "text": "merge", "kind": "data" },
+    { "from": "enrich", "to": "db", "text": "correct", "kind": "data" },
+
+    { "from": "db", "to": "queue", "text": "serve", "kind": "data" },
+    { "from": "db", "to": "deck", "kind": "data" },
+    { "from": "db", "to": "validation", "kind": "data" },
+
+    { "from": "queue", "to": "decide", "text": "decide" },
+    { "from": "deck", "to": "decide" },
+    { "from": "validation", "to": "decide", "text": "confirm" },
+
+    { "from": "decide", "to": "db", "text": "write · 409 if stale", "kind": "data" },
+    { "from": "decide", "to": "live", "text": "broadcast" },
+    { "from": "live", "to": "queue", "text": "SSE" },
+    { "from": "live", "to": "scoreboard", "text": "SSE" },
+    { "from": "claims", "to": "deck", "text": "auto-skip" },
+
+    { "from": "db", "to": "export", "text": "decided rows only", "kind": "data" },
+    { "from": "db", "to": "snapshots", "kind": "data" },
+    { "from": "export", "to": "handoff", "text": "xlsx" },
+
+    { "from": "seed", "to": "paths", "text": "needs new columns" },
+    { "from": "seed", "to": "ilt-score" },
+    { "from": "db", "to": "deploy" }
+  ],
+
+  "questions": [
+    "Path associations vs. ILT-into-the-suggestion — which one lands first?",
+    "Is the delete second pass still earning its keep once SMEs are up to speed, or is it just slowing the queue?",
+    "Deploy to rivbox now and seed via admin upload, or stay on localhost until the census is rebuilt with path columns?",
+    "Should Repoint stay demoted on the Compare deck, or come back once path data lands?"
+  ]
+}
