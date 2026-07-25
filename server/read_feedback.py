@@ -47,12 +47,22 @@ def load(slug: str):
 
 def collect(board, fb):
     nodes = {n["id"]: n for n in board.get("nodes", [])}
+    marks = fb.get("marks") or []
     edges = {}
     for i, e in enumerate(board.get("edges", [])):
         edges[e.get("id") or f"e{i}"] = e
 
     nfb = fb.get("nodes") or {}
     efb = fb.get("edges") or {}
+
+    # A handwritten note pinned to a box is a comment on that box — it just came
+    # in through the pen instead of the panel. Fold it in so it shows up next to
+    # the verdict rather than stranded in a "drawings" appendix.
+    hand_notes = {}
+    for m in marks:
+        if m.get("type") == "text" and (m.get("text") or "").strip():
+            for nid in m.get("anchors") or []:
+                hand_notes.setdefault(nid, []).append(m["text"].strip())
 
     buckets = {k: [] for k in ORDER}
     commented_only = []
@@ -62,7 +72,7 @@ def collect(board, fb):
         comment = (entry.get("comment") or "").strip()
         if verdict in buckets:
             buckets[verdict].append((spec, comment))
-        elif comment:
+        elif comment or nid in hand_notes:
             commented_only.append((spec, comment))
 
     edge_notes = []
@@ -77,7 +87,7 @@ def collect(board, fb):
         nid
         for nid, e in nfb.items()
         if e and (e.get("verdict") or (e.get("comment") or "").strip())
-    }
+    } | set(hand_notes)
     unreviewed = [n["id"] for n in board.get("nodes", []) if n["id"] not in reviewed]
 
     answers = []
@@ -96,6 +106,11 @@ def collect(board, fb):
         "proposed_nodes": [p for p in fb.get("proposedNodes") or [] if (p.get("text") or "").strip()],
         "proposed_edges": fb.get("proposedEdges") or [],
         "general": (fb.get("general") or "").strip(),
+        "marks": marks,
+        "hand_notes": hand_notes,
+        # so a hand-drawn arrow can be told apart from one that just re-traces the plan
+        "existing_edges": {(e["from"], e["to"]) for e in board.get("edges", [])}
+        | {(e["from"], e["to"]) for e in fb.get("proposedEdges") or []},
         "reviewed_count": len(reviewed),
         "total": len(nodes),
     }
@@ -116,6 +131,36 @@ def meta_line(spec):
     return " · ".join(bits)
 
 
+def namer(data):
+    """id -> readable label, covering plan boxes and reviewer-proposed ones."""
+    names = dict(data["nodes"])
+    for p in data["proposed_nodes"]:
+        names[p["id"]] = p
+    return lambda i: label(names.get(i, {"text": i}))
+
+
+def mark_sections(data):
+    """Freehand markup, bucketed for reporting.
+
+    Notes that landed on a box are reported *with that box* instead of here, so
+    every signal appears exactly once. What's left is markup that has no natural
+    home in the verdict list: floating notes, arrows, regions, raw strokes.
+    """
+    floating, arrows, regions, strokes = [], [], [], []
+    for m in data["marks"]:
+        t = m.get("type")
+        if t == "text":
+            if (m.get("text") or "").strip() and not (m.get("anchors") or []):
+                floating.append(m)
+        elif t == "arrow":
+            arrows.append(m)
+        elif t == "region":
+            regions.append(m)
+        elif t == "ink":
+            strokes.append(m)
+    return floating, arrows, regions, strokes
+
+
 def wrap(text, indent, width=88):
     out, line = [], ""
     for word in text.split():
@@ -132,6 +177,20 @@ def wrap(text, indent, width=88):
 def render_text(board, fb, data) -> str:
     L = []
     slug = board.get("slug") or ""
+    nm = namer(data)
+    floating, arrows, regions, strokes = mark_sections(data)
+    mark_signals = len(floating) + len(arrows) + len(regions) + len(strokes) + sum(
+        len(v) for v in data["hand_notes"].values()
+    )
+
+    def hand(spec):
+        """The pen's notes for this box, indented under its entry."""
+        return [
+            line
+            for note in data["hand_notes"].get(spec.get("id"), [])
+            for line in wrap(f'✎ handwritten: "{note}"', "      ")
+        ]
+
     L.append("═" * 72)
     L.append(f"STEERING DIGEST — {board.get('title', slug)}")
     who = fb.get("reviewer") or "(unnamed reviewer)"
@@ -144,6 +203,7 @@ def render_text(board, fb, data) -> str:
         + len(data["proposed_edges"])
         + len(data["answers"])
         + (1 if data["general"] else 0)
+        + mark_signals
     )
     L.append(
         f"{who} · saved {when} · {sig} signal(s) · "
@@ -166,13 +226,15 @@ def render_text(board, fb, data) -> str:
         L.append(RULE)
         if key == "keep":
             # anything with a comment gets its own entry; the rest collapse to one line
-            bare = [s for s, c in items if not c]
+            bare = [s for s, c in items if not c and not hand(s)]
             if bare:
                 L.append("  " + ", ".join(label(s) for s in bare))
             for spec, comment in items:
-                if comment:
+                if comment or hand(spec):
                     L.append(f"  · {label(spec)}")
-                    L += wrap(f"▸ {comment}", "      ")
+                    if comment:
+                        L += wrap(f"▸ {comment}", "      ")
+                    L += hand(spec)
             continue
         for spec, comment in items:
             L.append(f"  · {label(spec)}   [{spec.get('id')}]")
@@ -181,8 +243,9 @@ def render_text(board, fb, data) -> str:
                 L.append(f"      {m}")
             if comment:
                 L += wrap(f"▸ {comment}", "      ")
-            else:
+            elif not hand(spec):
                 L.append("      ▸ (no comment — verdict only)")
+            L += hand(spec)
 
     if data["commented_only"]:
         L.append("")
@@ -190,7 +253,9 @@ def render_text(board, fb, data) -> str:
         L.append(RULE)
         for spec, comment in data["commented_only"]:
             L.append(f"  · {label(spec)}   [{spec.get('id')}]")
-            L += wrap(f"▸ {comment}", "      ")
+            if comment:
+                L += wrap(f"▸ {comment}", "      ")
+            L += hand(spec)
 
     if data["proposed_nodes"]:
         L.append("")
@@ -207,11 +272,6 @@ def render_text(board, fb, data) -> str:
             f"⇢ CONNECTIONS ({len(data['edge_notes']) + len(data['proposed_edges'])})"
         )
         L.append(RULE)
-        # proposed nodes aren't in board.json, so fold them into the name lookup
-        names = dict(data["nodes"])
-        for p in data["proposed_nodes"]:
-            names[p["id"]] = p
-        nm = lambda i: label(names.get(i, {"text": i}))
         for eid, spec, verdict, comment in data["edge_notes"]:
             tag = f"[{verdict}] " if verdict else ""
             L.append(f"  · {tag}{nm(spec['from'])} → {nm(spec['to'])}")
@@ -221,6 +281,48 @@ def render_text(board, fb, data) -> str:
             L.append(f"  · [NEW] {nm(e['from'])} → {nm(e['to'])}")
             if (e.get("comment") or "").strip():
                 L += wrap(f"▸ {e['comment'].strip()}", "      ")
+
+    if floating or arrows or regions or strokes:
+        L.append("")
+        L.append(f"✎ FREEHAND MARKUP ({len(floating) + len(arrows) + len(regions) + len(strokes)})")
+        L.append(RULE)
+        if data["hand_notes"]:
+            L.append("  (handwritten notes that landed on a box are listed with that box above)")
+
+        for m in floating:
+            L += wrap(f'· note, unattached: "{m["text"].strip()}"', "  ")
+
+        for m in arrows:
+            a, b = m.get("hitFrom"), m.get("hitTo")
+            if a and b:
+                L.append(f"  · arrow drawn: {nm(a)}  →  {nm(b)}")
+                if (a, b) in data["existing_edges"]:
+                    L.append("      ▸ the plan already has this edge — read it as emphasis on that dependency")
+                elif (b, a) in data["existing_edges"]:
+                    L.append("      ▸ the plan has this edge the OTHER way round — the reviewer may be reversing it")
+                else:
+                    L.append("      ▸ a link the plan doesn't have — decide whether it belongs")
+            elif a or b:
+                known = nm(a or b)
+                L.append(f"  · arrow {'from' if a else 'into'} {known}, other end in open space")
+            else:
+                L.append("  · arrow in open space (nothing at either end)")
+
+        for m in regions:
+            ring = [nm(i) for i in (m.get("anchors") or [])]
+            L.append(f"  · region ringed: {', '.join(ring) if ring else '(empty area)'}")
+            if len(ring) > 1:
+                L.append("      ▸ treat these as one unit — the reviewer grouped them deliberately")
+
+        # strokes carry no words, so the useful signal is purely "over what"
+        by_target = {}
+        for m in strokes:
+            key = (tuple(m.get("anchors") or []), bool(m.get("highlight")))
+            by_target[key] = by_target.get(key, 0) + 1
+        for (anchors, hl), n in sorted(by_target.items(), key=lambda kv: -kv[1]):
+            pen = "highlighter" if hl else "pen"
+            where = ", ".join(nm(i) for i in anchors) if anchors else "open space"
+            L.append(f"  · {n} {pen} mark{'' if n == 1 else 's'} over {where}")
 
     if data["answers"]:
         L.append("")
@@ -259,11 +361,27 @@ def render_text(board, fb, data) -> str:
     if data["buckets"]["change"]:
         L.append(f"  {step}. Rework per the comment: " + ", ".join(label(s) for s, _ in data["buckets"]["change"]))
         step += 1
+    linked = [
+        m
+        for m in arrows
+        if m.get("hitFrom")
+        and m.get("hitTo")
+        and (m["hitFrom"], m["hitTo"]) not in data["existing_edges"]
+    ]
+    if linked:
+        L.append(
+            f"  {step}. Wire up the hand-drawn links: "
+            + ", ".join(f"{nm(m['hitFrom'])} → {nm(m['hitTo'])}" for m in linked)
+        )
+        step += 1
     if data["answers"]:
         L.append(f"  {step}. Treat the answered questions above as decided — stop asking.")
         step += 1
     if data["general"]:
         L.append(f"  {step}. Apply the general direction across the whole plan.")
+        step += 1
+    if regions or strokes or floating:
+        L.append(f"  {step}. Read the remaining freehand markup as emphasis on the boxes it names.")
         step += 1
     if step == 1:
         L.append("  (nothing actionable — comments only)")
@@ -273,6 +391,8 @@ def render_text(board, fb, data) -> str:
 
 
 def render_md(board, fb, data) -> str:
+    nm = namer(data)
+    floating, arrows, regions, strokes = mark_sections(data)
     L = [f"# Review feedback — {board.get('title')}", ""]
     L.append(f"*{fb.get('reviewer') or 'reviewer'} · {(fb.get('updated') or '')[:19].replace('T',' ')}*")
     for key in ORDER:
@@ -282,6 +402,8 @@ def render_md(board, fb, data) -> str:
         L += ["", f"## {HEAD[key][0]}"]
         for spec, comment in items:
             L.append(f"- **{label(spec)}** (`{spec.get('id')}`)" + (f" — {comment}" if comment else ""))
+            for note in data["hand_notes"].get(spec.get("id"), []):
+                L.append(f"  - ✎ handwritten: *{note}*")
     if data["proposed_nodes"]:
         L += ["", "## Proposed by reviewer"]
         for p in data["proposed_nodes"]:
@@ -290,6 +412,18 @@ def render_md(board, fb, data) -> str:
         L += ["", "## Questions answered"]
         for q, a in data["answers"]:
             L.append(f"- **{q}**  \n  {a}")
+    if floating or arrows or regions or strokes:
+        L += ["", "## Freehand markup"]
+        for m in floating:
+            L.append(f"- note: *{m['text'].strip()}*")
+        for m in arrows:
+            a, b = m.get("hitFrom"), m.get("hitTo")
+            L.append(f"- arrow: {nm(a) if a else '?'} → {nm(b) if b else '?'}")
+        for m in regions:
+            L.append("- region: " + (", ".join(nm(i) for i in (m.get("anchors") or [])) or "(empty area)"))
+        for m in strokes:
+            where = ", ".join(nm(i) for i in (m.get("anchors") or [])) or "open space"
+            L.append(f"- {'highlighter' if m.get('highlight') else 'pen'} over {where}")
     if data["general"]:
         L += ["", "## General direction", "", data["general"]]
     return "\n".join(L) + "\n"

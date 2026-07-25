@@ -60,12 +60,47 @@ python3 server/serve.py --slug shell-review-app --reset --open
 
 Everything autosaves (~500 ms debounce); the top bar shows **feedback saved ✓**.
 
+## …or just draw on it
+
+The panel is the precise way to review. The toolbar down the left is the fast one —
+the thing you'd actually do at a whiteboard.
+
+| Tool | Key | What it's for | What the agent gets |
+|---|---|---|---|
+| Select | `v` | click, pan, drag handles to connect | — |
+| Pen | `p` | circle it, cross it out, sketch | *"1 pen mark over Decision engine"* |
+| Highlighter | `h` | wide translucent emphasis | *"1 highlighter mark over Path associations"* |
+| Text | `t` | click anywhere, type a note | the note, filed **under the box it sits on** |
+| Box | `b` | drag out your own box, name it | a proposed piece of work (same as double-click) |
+| Region | `r` | ring a whole cluster | *"treat these as one unit: Queue, Deck, Validation"* |
+| Arrow | `a` | point from one box to another | *"Export → Path associations"*, and a contract step |
+| Eraser | `e` | click or drag over markup | — |
+
+`⌘Z` undoes drawing, and only drawing — verdicts and comments are deliberate
+single clicks and are never silently reversed. Colour picker appears while a
+drawing tool is active; **clear N** removes all markup (undoable).
+
+**Freehand is not decoration — it's typed data.** Every mark records which plan
+boxes it covers (`anchors`) at the moment you draw it, so `read_feedback.py` can
+say *what the scribble was about* instead of dumping coordinates. A note dropped
+on a box is reported as that box's comment. An arrow between two boxes is
+resolved to their names, checked against the plan's existing edges, and — if it's
+genuinely new — promoted into the action contract.
+
+Marks also record the position of their anchor box (`origin`). When the layout
+moves — a re-layout, a longer label, or the agent rewriting `board.json` between
+rounds — every mark is re-seated onto its box. A circle drawn around the decision
+engine stays around the decision engine.
+
 ## Files
 
 ```
 src/lib/layout.js          ELK layout + orthogonal routes + back-edge detection
-src/lib/feedback.svelte.js the typed feedback store (Svelte 5 runes) + autosave
-src/Board.svelte           canvas, two-pass measure, selection, camera, keyboard
+src/lib/ink.js             freehand geometry: smoothing, RDP, anchoring, hit tests
+src/lib/feedback.svelte.js the typed feedback store (Svelte 5 runes) + autosave + undo
+src/Board.svelte           canvas, two-pass measure, selection, camera, keyboard, drawing
+src/canvas/DrawToolbar.svelte  tool + colour picker
+src/canvas/MarkLayer.svelte    renders marks inside the flow viewport
 src/nodes/PlanNode.svelte  a plan box + its verdict state
 src/nodes/ProposedNode.svelte  reviewer-authored box
 src/edges/RoutedEdge.svelte    ELK polyline + self-drawn arrowhead + verdict marker
@@ -101,6 +136,30 @@ Same coordinate-free logical graph as the tldraw skill, plus review-oriented fie
 `detail` is clamped to two lines on the canvas and shown in full in the panel, so
 long context doesn't blow the layout out.
 
+## feedback.json
+
+Written by the board, read by `read_feedback.py`. Verdicts and comments are keyed
+by node/edge id; freehand lives in `marks`:
+
+```jsonc
+{
+  "nodes": { "paths": { "verdict": "first", "comment": "…" } },
+  "proposedNodes": [{ "id": "prop-1", "text": "…", "comment": "…" }],
+  "proposedEdges": [{ "id": "pe-a->b", "from": "a", "to": "b" }],
+  "marks": [
+    { "id": "mk-pen-6", "type": "ink", "points": [[1121.9, 769.7], …],
+      "color": "#c77dff", "width": 3, "highlight": false,
+      "anchors": ["decide"],                    // plan boxes this covers
+      "origin": { "id": "decide", "x": 900, "y": 640 } },  // where that box was
+    { "type": "text", "x": 1882, "y": 1024.5, "text": "who owns this?", "anchors": ["deploy"] },
+    { "type": "arrow", "from": [x, y], "to": [x, y], "hitFrom": "export", "hitTo": "paths" },
+    { "type": "region", "x": 0, "y": 0, "w": 276, "h": 495, "anchors": ["queue", "deck"] }
+  ],
+  "answers": { "0": "…" },
+  "general": "…"
+}
+```
+
 ## Design notes / things learned
 
 - **ELK owns layout and routing, not Svelte Flow.** Svelte Flow's built-in edges
@@ -121,19 +180,45 @@ long context doesn't blow the layout out.
 - **Routes are static** (same tradeoff as the tldraw build). Dragging a box does not
   re-route its lines — hit **Re-layout**. Proposed edges are the exception: they use
   a live smoothstep path, so they follow drags.
+- **Screen→flow coordinates come from the transform on screen**, not from the
+  `viewport` state. Selecting a box glides the camera for 260 ms, and during that
+  glide the state already holds the destination — anything drawn mid-glide was
+  being committed at coordinates the reviewer never saw. `flowPos()` reads the
+  live `DOMMatrix` off `.svelte-flow__viewport` instead, and the camera doesn't
+  animate at all while a drawing tool is up.
+- **Marks are anchored, not just positioned.** Storing flow coordinates alone is
+  a trap: the layout moves whenever anything changes (even naming a proposed box
+  re-flows the graph and strands every mark). Each mark keeps the position of its
+  anchor box, and `reconcileMarks()` re-seats it after every layout.
 - **`window.__wbflow`** is exposed for scripting: `.board .nodes .edges .feedback
-  .layout`, `.connect(a,b)`, `.select(id)`, `.focus(id)`, `.relayout()`, `.save()`.
+  .marks .boxes .layout`, `.connect(a,b)`, `.select(id)`, `.focus(id)`,
+  `.relayout()`, `.save()`, plus the drawing API — `.tool(name)`, `.color(hex)`,
+  `.ink(points)`, `.arrow(from,to)`, `.region(x,y,w,h)`, `.note(x,y,text)`,
+  `.erase(x,y)`, `.clearMarks()`, `.undo()`.
 - **Automation caveat:** Svelte Flow leaves nodes `visibility: hidden` until its
   ResizeObserver has measured them, which doesn't happen in a background tab — so
   handles aren't hit-testable there. Use `__wbflow.connect()` to script connections.
+  Chrome also *freezes* a backgrounded tab within about a minute: `setTimeout`,
+  `fetch` and `requestAnimationFrame` all stop, so autosaves queue up and only
+  fly when the tab comes back. Synthetic `PointerEvent`s dispatched at `.pane`
+  still drive the real drawing handlers, and Svelte flushes on a microtask, so
+  `await Promise.resolve()` is the way to wait for the DOM in a frozen tab.
 
 ## Status
 
 Verified end-to-end in Chrome: layout, 0-overlap routing, node verdicts, comments,
 keyboard, camera-follow, proposing a node, proposing a connection, autosave to
-`feedback.json`, and the digest. The pointer-level handle **drag** was verified only
-through `__wbflow.connect()` — the drag itself is stock Svelte Flow behaviour but
-could not be driven in a backgrounded automation tab.
+`feedback.json`, and the digest.
+
+Drawing verified with real pointer events (a genuine `left_click_drag`, then
+synthetic `PointerEvent` sequences through the same handlers): pen, highlighter,
+text notes, region, arrow, box, eraser, `⌘Z`, the colour picker, persistence, and
+reload-from-disk. Mark geometry was checked against live box rects — the pen ring
+encloses its box, the region encloses all four boxes it was drawn around, the
+note sits inside the box it names.
+
+The pointer-level handle **drag** for proposing a connection is still verified
+only through `__wbflow.connect()` (see the automation caveat above).
 
 Not done: multi-reviewer/persistent store, offline vendoring of the bundle
 (`elkjs` + Svelte Flow are bundled locally, but it's a 1.7 MB build), and any

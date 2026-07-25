@@ -192,6 +192,20 @@
         <li><b>Click a line</b> → say what's wrong with it.</li>
       </ul>
     </section>
+
+    <section class="tips">
+      <div class="lbl">Or just draw on it</div>
+      <ul>
+        <li>
+          <kbd>p</kbd> pen <kbd>h</kbd> highlighter <kbd>t</kbd> text <kbd>b</kbd> box
+          <kbd>r</kbd> region <kbd>a</kbd> arrow <kbd>e</kbd> eraser <kbd>v</kbd> back to select
+        </li>
+        <li><b>Whatever you draw on a box is attached to it</b> — the digest reports it by name.</li>
+        <li><b>An arrow between two boxes</b> reads as “X → Y”, so aim at the boxes.</li>
+        <li><b>Notes</b> beat scribbles: a circle says <i>look here</i>, words say why.</li>
+        <li><kbd>⌘Z</kbd> undoes drawing only — never a verdict.</li>
+      </ul>
+    </section>
   {/if}
 </aside>
 

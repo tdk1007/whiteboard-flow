@@ -23,6 +23,7 @@ export function emptyFeedback() {
     edges: {}, // edgeId -> {verdict, comment}
     proposedNodes: [], // {id, text, detail, group, comment}
     proposedEdges: [], // {id, from, to, text, comment}
+    marks: [], // freehand: {id, type:'ink'|'text'|'arrow'|'region', geom…, color, anchors:[nodeId]}
     answers: {}, // question index -> text
     general: '',
   };
@@ -33,6 +34,14 @@ export function createFeedbackStore(initial) {
   let status = $state('idle'); // idle | dirty | saving | saved | error
   let timer = null;
 
+  // Undo is scoped to *drawing* on purpose. A pen with no undo is unusable, but
+  // silently reversing verdicts and comments with the same keystroke would be a
+  // trap — those are single deliberate clicks with visible state.
+  let undoStack = $state([]);
+  const pushUndo = (op) => {
+    undoStack = [...undoStack.slice(-49), op];
+  };
+
   function flush() {
     status = 'saving';
     fb.updated = new Date().toISOString();
@@ -40,6 +49,9 @@ export function createFeedbackStore(initial) {
     // `__fresh` is a transient "open me in rename mode" flag; persisting it would
     // put every proposed box back into edit mode on the next load.
     snap.proposedNodes = snap.proposedNodes.map(({ __fresh, ...rest }) => rest);
+    snap.marks = (snap.marks || [])
+      .filter((m) => m.type !== 'text' || (m.text || '').trim()) // never persist an empty label
+      .map(({ __fresh, ...rest }) => rest);
     saveFeedback(snap)
       .then(() => {
         status = 'saved';
@@ -109,6 +121,44 @@ export function createFeedbackStore(initial) {
       fb.proposedEdges = fb.proposedEdges.filter((e) => e.id !== id);
       touch();
     },
+    // ----------------------------------------------------------- freehand marks
+    addMark(mark) {
+      fb.marks = [...fb.marks, mark];
+      pushUndo({ kind: 'add', marks: [mark.id] });
+      touch();
+    },
+    updateMark(id, patch) {
+      fb.marks = fb.marks.map((m) => (m.id === id ? { ...m, ...patch } : m));
+      touch();
+    },
+    removeMarks(ids) {
+      const set = new Set(ids);
+      const gone = fb.marks.filter((m) => set.has(m.id));
+      if (!gone.length) return;
+      fb.marks = fb.marks.filter((m) => !set.has(m.id));
+      pushUndo({ kind: 'remove', snapshot: $state.snapshot(gone) });
+      touch();
+    },
+    get canUndo() {
+      return undoStack.length > 0;
+    },
+    get markCount() {
+      return fb.marks.length;
+    },
+    undoDrawing() {
+      const op = undoStack[undoStack.length - 1];
+      if (!op) return null;
+      undoStack = undoStack.slice(0, -1);
+      if (op.kind === 'add') {
+        const set = new Set(op.marks);
+        fb.marks = fb.marks.filter((m) => !set.has(m.id));
+      } else {
+        fb.marks = [...fb.marks, ...op.snapshot];
+      }
+      touch();
+      return op.kind;
+    },
+
     setAnswer(i, text) {
       fb.answers[String(i)] = text;
       touch();
@@ -139,6 +189,7 @@ export function signalCount(fb) {
   for (const v of Object.values(fb.nodes)) if (v && (v.verdict || (v.comment || '').trim())) n++;
   for (const v of Object.values(fb.edges)) if (v && (v.verdict || (v.comment || '').trim())) n++;
   n += fb.proposedNodes.length + fb.proposedEdges.length;
+  n += (fb.marks || []).filter((m) => m.type !== 'text' || (m.text || '').trim()).length;
   for (const a of Object.values(fb.answers)) if ((a || '').trim()) n++;
   if ((fb.general || '').trim()) n++;
   return n;
