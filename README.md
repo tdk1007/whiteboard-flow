@@ -276,3 +276,20 @@ only through `__wbflow.connect()` (see the automation caveat above).
 Not done: multi-reviewer/persistent store, offline vendoring of the bundle
 (`elkjs` + Svelte Flow are bundled locally, but it's a 1.7 MB build), and any
 decision about whether this replaces `/whiteboard` or ships beside it.
+
+## Roadmap / known gaps
+
+- **You can't select or move a text note once it's drawn.** Reported again
+  2026-07-25. The `t` tool calls `review.addMark({ type: 'text' })`, so a note is
+  a *mark* living in the `pointer-events: none` SVG overlay — not a Svelte Flow
+  node. Marks are immutable after commit: they move only as a side effect of
+  their anchor box moving (`reconcileMarks`), and can otherwise only be erased
+  and redrawn. The select tool only ever sees nodes. Fixing it means giving marks
+  their own hit-test and drag path in select mode; `markHit()` in `ink.js`
+  already does the geometry for the eraser, so the hard part exists. The same gap
+  applies to every mark type — text is just where it's felt most, because a note
+  in the wrong place is the one mark you want to nudge rather than rewrite.
+- **Visual design pass** — legibility at overview zoom, status/verdict hues that
+  currently collide, unplated edge labels, faint group frames. Brief:
+  `~/Claude Code/_handoffs/whiteboard-flow-visual-design-handoff.md`.
+- Multi-reviewer store, and the `/whiteboard` replace-or-coexist decision (above).
