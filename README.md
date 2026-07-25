@@ -67,9 +67,10 @@ the thing you'd actually do at a whiteboard.
 
 | Tool | Key | What it's for | What the agent gets |
 |---|---|---|---|
-| Select | `v` | click, pan, drag handles to connect | — |
+| Select | `v` | click a box, drag it, drag handles to connect | — |
+| Pan | `h` | drag anywhere to move the board; nothing else moves | — |
 | Pen | `p` | circle it, cross it out, sketch | *"1 pen mark over Decision engine"* |
-| Highlighter | `h` | wide translucent emphasis | *"1 highlighter mark over Path associations"* |
+| Highlighter | `m` | wide translucent emphasis | *"1 highlighter mark over Path associations"* |
 | Text | `t` | click anywhere, type a note | the note, filed **under the box it sits on** |
 | Box | `b` | drag out your own box, name it | a proposed piece of work (same as double-click) |
 | Region | `r` | ring a whole cluster | *"treat these as one unit: Queue, Deck, Validation"* |
@@ -253,6 +254,12 @@ region, arrow, box, eraser, `⌘Z`, the colour picker, persistence, and
 reload-from-disk. Mark geometry checked against live box rects — the pen ring
 encloses its box, the region encloses all four boxes it was drawn around, the
 note sits inside the box it names — and paint verified by screenshot.
+
+Modes verified by driving real mouse gestures: in **pan** a drag starting on top of
+a box moves the camera 1:1 (80 px dragged → 80 px moved, zoom held) and leaves the
+box where it was, clicking a box doesn't change what's under review, and
+double-click proposes nothing; in **select** the same drag moves the box and
+leaves the camera alone. `esc` and a second `h` both return to select.
 
 Curved arrows: fit accuracy measured against four synthetic gestures (arc, sine
 arch, S-curve, arc + hand jitter) at 0.3–0.7 % of arrow length; endpoints pinned;

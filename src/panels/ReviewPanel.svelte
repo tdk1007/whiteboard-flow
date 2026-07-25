@@ -197,11 +197,12 @@
       <div class="lbl">Or just draw on it</div>
       <ul>
         <li>
-          <kbd>p</kbd> pen <kbd>h</kbd> highlighter <kbd>t</kbd> text <kbd>b</kbd> box
-          <kbd>r</kbd> region <kbd>a</kbd> arrow <kbd>e</kbd> eraser <kbd>v</kbd> back to select
+          <kbd>p</kbd> pen <kbd>m</kbd> marker <kbd>t</kbd> text <kbd>b</kbd> box
+          <kbd>r</kbd> region <kbd>a</kbd> arrow <kbd>e</kbd> eraser
         </li>
+        <li><kbd>v</kbd> select and move things · <kbd>h</kbd> hand, drag to move the board</li>
         <li><b>Whatever you draw on a box is attached to it</b> — the digest reports it by name.</li>
-        <li><b>An arrow between two boxes</b> reads as “X → Y”, so aim at the boxes.</li>
+        <li><b>An arrow between two boxes</b> reads as “X → Y”, so aim at the boxes. Swing it and it keeps the curve; hold <kbd>shift</kbd> for straight.</li>
         <li><b>Notes</b> beat scribbles: a circle says <i>look here</i>, words say why.</li>
         <li><kbd>⌘Z</kbd> undoes drawing only — never a verdict.</li>
       </ul>

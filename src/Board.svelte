@@ -57,14 +57,20 @@
   let propCounter = highestId(review.fb.proposedNodes, /^prop-(\d+)$/);
 
   // ------------------------------------------------------------------ drawing
-  let tool = $state('select'); // select | pen | marker | text | box | region | arrow | eraser
+  let tool = $state('select'); // select | pan | pen | marker | text | box | region | arrow | eraser
   let penColor = $state(PEN_COLORS[0].hex);
   let draft = $state(null); // the mark currently under the cursor
   let editingMark = $state(null); // id of the text mark being typed into
   let hint = $state(null);
   let hintTimer = null;
   let markCounter = highestId(review.fb.marks, /^mk-[a-z]+-(\d+)$/);
-  const drawTool = $derived(tool !== 'select');
+
+  // Three families, not two. `select` grabs and moves things, `pan` moves the
+  // camera and touches nothing, and everything else puts ink down. Pan has to be
+  // its own mode because dragging a box and dragging the board are the same
+  // gesture — the tool is what tells them apart.
+  const drawTool = $derived(tool !== 'select' && tool !== 'pan');
+  const editTool = $derived(tool === 'select');
 
   function say(msg) {
     hint = msg;
@@ -73,6 +79,7 @@
   }
 
   const TOOL_HINT = {
+    pan: 'Pan — drag anywhere to move the board. Boxes stay put.',
     pen: 'Pen — drag to draw. Colour picker on the left.',
     marker: 'Highlighter — drag over what matters.',
     text: 'Text — click anywhere to drop a note.',
@@ -644,7 +651,7 @@
   }
 
   function onPaneDblClick(event) {
-    if (drawTool) return;
+    if (!editTool) return; // pan is for looking around — it must not author work
     if (event.target.closest('.svelte-flow__node, .label-wrap')) return;
     const p = flowPos(event.clientX, event.clientY);
     const id = `prop-${++propCounter}`;
@@ -681,7 +688,7 @@
     }
   }
 
-  const TOOL_KEYS = { v: 'select', p: 'pen', h: 'marker', t: 'text', b: 'box', r: 'region', a: 'arrow', e: 'eraser' };
+  const TOOL_KEYS = { v: 'select', h: 'pan', p: 'pen', m: 'marker', t: 'text', b: 'box', r: 'region', a: 'arrow', e: 'eraser' };
 
   function onKey(e) {
     const t = e.target;
@@ -704,7 +711,7 @@
         draft = null;
         return;
       }
-      if (drawTool) {
+      if (tool !== 'select') {
         tool = 'select';
         return;
       }
@@ -776,19 +783,19 @@
         {edgeTypes}
         minZoom={0.15}
         maxZoom={2.2}
-        nodesDraggable={!drawTool}
-        nodesConnectable={!drawTool}
-        elementsSelectable={!drawTool}
+        nodesDraggable={editTool}
+        nodesConnectable={editTool}
+        elementsSelectable={editTool}
         panOnDrag={drawTool ? [1, 2] : true}
         zoomOnDoubleClick={false}
         ondelete={onDelete}
         proOptions={{ hideAttribution: true }}
-        onnodeclick={({ node }) => !drawTool && selectNode(node.id)}
+        onnodeclick={({ node }) => editTool && selectNode(node.id)}
         onedgeclick={({ edge }) => {
-          if (drawTool) return;
+          if (!editTool) return;
           selection = { kind: 'edge', id: edge.id, edge: edge.data };
         }}
-        onpaneclick={() => !drawTool && (selection = null)}
+        onpaneclick={() => editTool && (selection = null)}
         onconnect={onConnect}
       >
         <Background variant={BackgroundVariant.Dots} gap={22} size={1} />
@@ -844,6 +851,14 @@
   .pane.drawing :global(.svelte-flow__pane) { cursor: crosshair; }
   .pane[data-tool='text'], .pane[data-tool='text'] :global(.svelte-flow__pane) { cursor: text; }
   .pane[data-tool='eraser'], .pane[data-tool='eraser'] :global(.svelte-flow__pane) { cursor: cell; }
+  /* the hand has to win over the node's own pointer cursor, or hovering a box
+     while panning still says "click me" — hence :global on the node too */
+  .pane[data-tool='pan'],
+  .pane[data-tool='pan'] :global(.svelte-flow__pane),
+  .pane[data-tool='pan'] :global(.svelte-flow__node) { cursor: grab; }
+  .pane[data-tool='pan']:active,
+  .pane[data-tool='pan']:active :global(.svelte-flow__pane),
+  .pane[data-tool='pan']:active :global(.svelte-flow__node) { cursor: grabbing; }
   .hint {
     position: absolute;
     left: 50%;
