@@ -1,5 +1,17 @@
 # whiteboard-flow — spike
 
+> **⚠️ Archived 2026-07-28 — the spike won, and moved.**
+>
+> This code now lives at `~/.claude/skills/whiteboard/` as the shipped `/whiteboard`
+> skill, in `tdk1007/claude-code-skills`. It replaced the dependency-free vanilla-JS
+> implementation, which was deleted (recoverable from history in both repos).
+>
+> One change was made during the move: boards default to `~/whiteboards/<slug>/`
+> instead of this repo's `boards/`, because the skill directory auto-pushes to a git
+> remote on every edit. `$FLOW_BOARDS_DIR` still overrides.
+>
+> Develop there, not here. This repo is kept for history.
+
 A second take on `/whiteboard`, built on **Svelte Flow** (`@xyflow/svelte`) instead of
 tldraw, to test one idea:
 
